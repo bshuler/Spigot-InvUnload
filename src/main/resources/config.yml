@@ -37,7 +37,11 @@ use-worldguard: false
 # When set to true, we will check for updates on startup and every 24 hours
 # When set to on-startup, we will only check on startup
 # When set to false, don't check for updates
-check-for-updates: true
+#
+# NOTE: the original update-check endpoint (api.jeff-media.de) no longer
+# resolves at all, so this defaults to false now. Left in place (not
+# removed) in case a working endpoint is ever configured again.
+check-for-updates: false
 
 #########################
 ##### localization ######

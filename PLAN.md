@@ -33,11 +33,16 @@ support. See `CLAUDE.md` for architecture and fork provenance.
 
 ### 2. Forward merge + modern build (latest Paper API) — DONE
 
-- [x] `git merge upstream/master --ff-only` on `main` — clean fast-forward,
-      28 commits landed, no conflicts (expected, since the fork had zero
-      unique commits to reconcile). Verified no `.github/workflows/*` came
-      in with the merge (checked upstream's tree beforehand) — the push
-      restriction on this repo's `gh` token doesn't apply here.
+- [x] `git merge upstream/master` on `main` — by the time this ran, `main`
+      already carried the milestone-1 docs commit (this file + `CLAUDE.md`),
+      so a pure `--ff-only` merge correctly refused ("Diverging branches
+      can't be fast-forwarded"). Used a regular merge instead
+      (`git merge upstream/master -m "..."`); it resolved via git's `ort`
+      strategy with **zero conflicts**, as expected since the fork's own
+      commit only touched files upstream never had. All 28 upstream commits
+      landed. Verified no `.github/workflows/*` came in with the merge
+      (checked upstream's tree beforehand) — the push restriction on this
+      repo's `gh` token doesn't apply here.
 - [x] Replaced the Maven layout (`pom.xml`, dead `oss.sonatype.org` /
       `hub.spigotmc.org` snapshot repos) with Gradle 9.x + wrapper +
       `com.gradleup.shadow` + `foojay-resolver-convention`, mirroring the
@@ -53,8 +58,14 @@ support. See `CLAUDE.md` for architecture and fork provenance.
       re-checking; Minecraft is calendar-versioned now.
 - [x] Removed the vendored classic `Metrics.java` (668 lines, undeclared
       `org.json.simple` dependency the old `pom.xml` never actually
-      resolved) in favor of `org.bstats:bstats-bukkit:3.2.1` as a normal
-      shaded+relocated dependency.
+      resolved) **outright, with no replacement**. The modern
+      `org.bstats:bstats-bukkit` API requires a plugin ID registered on
+      bstats.org; this plugin was never registered under that model, and
+      fabricating an ID with no real dashboard behind it would misattribute
+      telemetry to nothing. (First draft of this work actually added
+      `bstats-bukkit` with a placeholder ID — caught and reverted before
+      commit; see `CLAUDE.md`'s dependency table for the full reasoning and
+      how to re-add it correctly with a real ID.)
 - [x] Converted the `ChestSort` integration (`trySort()` in `InvUnload.java`)
       from a hard compile-time import of `de.jeffclan.JeffChestSort.
       JeffChestSortPlugin` + a Maven `system`-scope dependency on a
@@ -125,13 +136,37 @@ via the `paperApiVersion` Gradle property, e.g.:
 ./gradlew clean shadowJar -PpaperApiVersion=1.18.2-R0.1-SNAPSHOT
 ```
 
+**First attempt at this walk actually failed** for 1.20.1/1.19.4/1.18.2:
+`private Particle particleType = Particle.WITCH;` (the hardcoded field
+initializer from milestone 2's Particle-rename fix) only compiles against
+`paper-api` coordinates *after* the ~1.20.5 particle rename — against older
+coordinates `WITCH`/`EFFECT` don't exist yet and javac fails with
+`cannot find symbol`. This is a real backward-compatibility break, not a
+tooling problem, and it's exactly the kind of thing "build against every
+version and see what actually happens" is supposed to catch rather than
+assume. Fixed by replacing the two hardcoded enum-constant field
+initializers with a small `resolveParticle(String...)` helper that does a
+runtime `Particle.valueOf(name)` lookup, trying the modern name first and
+falling back to the pre-rename name — the same `Particle.valueOf(String)`
+runtime-lookup pattern the `EpicFurnaces` sibling already uses for its
+config-driven particle type, just with a fixed two-name fallback list
+instead of a config value. `Particle.valueOf(String)` is a stable method
+signature across every paper-api version tested, so this keeps the source
+tree unmodified-across-versions while preserving the exact same runtime
+particle choice on every target. See `CLAUDE.md`.
+
 | Target | api-version needed | Status |
 |---|---|---|
-| 26.2 (latest) | `26.2` | **Built.** Default target. Jar verified non-empty. |
-| 1.21.11 (1.21.x) | `1.21` | **Built.** `-PpaperApiVersion=1.21.11-R0.1-SNAPSHOT`. |
-| 1.20.1 | `1.20` | **Built.** `-PpaperApiVersion=1.20.1-R0.1-SNAPSHOT`. |
-| 1.19.4 | `1.19` | **Built.** `-PpaperApiVersion=1.19.4-R0.1-SNAPSHOT`. |
-| 1.18.2 | `1.18` | **Built.** `-PpaperApiVersion=1.18.2-R0.1-SNAPSHOT`. |
+| 26.2 (latest) | `26.2` | **Built.** Default committed target. Jar: 13 files, 35102 bytes, verified with `unzip -l`. |
+| 1.21.11 (1.21.x) | `1.21` | **Built.** `-PpaperApiVersion=1.21.11-R0.1-SNAPSHOT`. Jar: 13 files, 35102 bytes. |
+| 1.20.1 | `1.20` | **Built** (after the `resolveParticle` fix above — failed to compile before it). `-PpaperApiVersion=1.20.1-R0.1-SNAPSHOT`. Jar: 13 files, 35102 bytes. |
+| 1.19.4 | `1.19` | **Built** (same fix required). `-PpaperApiVersion=1.19.4-R0.1-SNAPSHOT`. Jar: 13 files, 35102 bytes. |
+| 1.18.2 | `1.18` | **Built** (same fix required). `-PpaperApiVersion=1.18.2-R0.1-SNAPSHOT`. Jar: 13 files, 35102 bytes. |
+
+All five targets produce byte-identical-sized jars (same 13 entries: 6
+`.class` files, `config.yml`, `plugin.yml`, `META-INF/MANIFEST.MF`, 4
+directory entries) — expected, since there is genuinely zero
+version-conditional code in this plugin once `resolveParticle` is in place.
 
 `plugin.yml`'s shipped `api-version` stays at the latest target; the
 override mechanism above is how a maintainer reproduces/re-verifies any
@@ -139,14 +174,51 @@ older-version build without separate project files.
 
 ### 5. Verification
 
-- [ ] `unzip -l build/libs/*.jar` for every version above — confirm
-      real class/resource counts, not just `BUILD SUCCESSFUL`.
+- [x] `unzip -l build/libs/*.jar` for every version above — confirmed real
+      class/resource counts (13 files, 35102 bytes each), not just
+      `BUILD SUCCESSFUL`. Re-ran the 26.2 build once more afterward
+      (`./gradlew clean build`) to leave the working tree in its
+      committed-default state.
 - [ ] Optional Paper smoke-boot in the session scratchpad only (never
-      committed).
+      committed) — not performed this session; noted as optional in the
+      original task brief, left for a future pass if Bert wants runtime
+      (not just compile-time) confirmation.
 
 ## Open problems / honest blockers
 
-- (filled in as the build proceeds)
+- **ChestSort's original build was never actually resolvable.** Upstream's
+  `pom.xml` depended on a `system`-scoped `lib/ChestSort.jar` that upstream's
+  own `.gitignore` excludes from the repo — the Maven build has never
+  compiled from a clean checkout, on any commit, going back to upstream's
+  first commit. This wasn't discovered as a regression; it's how the
+  project always was. Converted to reflection (see `CLAUDE.md`), removing
+  the problem rather than working around it.
+- **Folia untested.** The update-checker's repeating task uses
+  `Bukkit.getScheduler().scheduleSyncRepeatingTask` (global scheduler) —
+  Folia's region-threaded scheduler model may not like a plugin scheduling
+  global-scope repeating tasks this way. Not smoke-tested on an actual
+  Folia server this session. Low real-world impact since
+  `check-for-updates` now defaults to `false` and the endpoint is dead
+  anyway, but flagged honestly rather than assumed fine.
+- **`scheduleSyncRepeatingTask` is itself a deprecated API** (superseded by
+  `BukkitScheduler.runTaskTimer`/`BukkitRunnable`) — this is the source of
+  the `BUILD SUCCESSFUL` build's "Some input files use or override a
+  deprecated API" note on every version target. Confirmed by `grep`, not
+  left as an unexplained warning. Not fixed, since it's inside the
+  already-dead update-checker code path and touching scheduler semantics
+  there for a feature that's off by default wasn't judged worth the risk
+  this pass — flagged for whoever re-enables update checking.
+- **bStats metrics removed, not replaced.** See `CLAUDE.md`'s dependency
+  table — no telemetry at all now, by design, rather than a fabricated
+  bstats.org plugin ID with no real dashboard behind it.
+- **The `invunload:dump` (colon) permission-node typo is inherited from
+  upstream and deliberately left unfixed** — see `CLAUDE.md`'s porting
+  notes. Cosmetic (the command's own `permission:` field already says
+  `invunload.dump` correctly), flagged in case Bert wants it corrected.
+- **The update-check endpoint (`api.jeff-media.de`) is permanently dead**
+  (`curl` gets a full connection failure, not even a 404) unless a new
+  endpoint is ever configured — `check-for-updates` defaults to `false`
+  now specifically because of this.
 
 ## Repository / git notes
 

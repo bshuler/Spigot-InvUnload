@@ -39,9 +39,12 @@ per the porting playbook:
   this specific plugin's history** — checked the full commit range, none of
   those coordinates ever appear here, so there was nothing to vendor or
   replace on that front.
-- Merge performed: `git merge upstream/master --ff-only` on `main` (renamed
-  from `master`, old default branch left in place untouched per repo
-  policy). This brought in all 28 upstream commits (WorldGuard integration,
+- Merge performed on `main` (renamed from `master`, old default branch left
+  in place untouched per repo policy). A pure `--ff-only` merge was tried
+  first but correctly refused once `main` carried its own docs commit;
+  fell back to a regular merge, which resolved with **zero conflicts**
+  (expected, since the fork's own commit never touched a file upstream
+  had). This brought in all 28 upstream commits (WorldGuard integration,
   ChestSort integration, config versioning/localization, the 0.1-alpha →
   Maven conversion, and the last release, `2.0.2`).
 
@@ -65,17 +68,17 @@ event driven, package `de.jeffclan.InvUnload`:
 - `Metrics` — the old pre-3.x bStats "classic" pattern: the entire bStats
   client vendored as one 668-line source file, unshaded, unrelocated,
   importing `org.json.simple.JSONArray/JSONObject` — a dependency the
-  original `pom.xml` never actually declared. **Replaced** (see below).
+  original `pom.xml` never actually declared. **Removed** (see below).
 
 ### Removed / replaced dependencies
 
 | Old | Why | Replacement |
 |---|---|---|
-| Vendored classic `Metrics.java` (`org.bstats.bukkit` "relocate-yourself" pattern) + implicit, undeclared `org.json.simple` dependency | 668-line relic predating the current bStats Gradle/Maven artifact; its own `pom.xml` never declared the `org.json.simple` dependency it imports, so the upstream Maven build was already broken on this axis; unrelocated bStats classes risk classpath collisions with any other plugin bundling the same classic pattern | `org.bstats:bstats-bukkit:3.2.1` as a normal dependency, shaded + relocated to `de.jeffclan.invunload.bstats` by the Shadow plugin — the standard modern approach, zero source-file vendoring needed |
+| Vendored classic `Metrics.java` (`org.bstats.bukkit` "relocate-yourself" pattern) + implicit, undeclared `org.json.simple` dependency | 668-line relic predating the current bStats Gradle/Maven artifact; its own `pom.xml` never declared the `org.json.simple` dependency it imports, so the upstream Maven build was already broken on this axis | **Removed outright**, no replacement. The modern `org.bstats:bstats-bukkit` API requires a plugin ID registered on bstats.org; this plugin was never registered under that model (the classic pattern didn't need one), and fabricating an ID with no real dashboard behind it would misattribute telemetry to nothing. A maintainer who wants metrics back should register a real ID at bstats.org and add `org.bstats:bstats-bukkit` + `new Metrics(this, id)` in `onEnable()` — left as a comment at the call site in `InvUnload.java`. |
 | `UpdateChecker` polling `https://api.jeff-media.de/invunload/invunload-latest-version.txt` | Domain no longer resolves (`curl` fails outright, not even a 404 — DNS/connection failure) | Update-check code path left in place but the config default `check-for-updates` is now `false` and a startup log line explains why; safe to re-enable if the endpoint ever comes back, doesn't fail loudly since the whole call is already wrapped in try/catch |
 | `de.jeffclan.JeffChestSort.JeffChestSortPlugin` compile-time import + a `system`-scoped Maven dependency on `${basedir}/lib/ChestSort.jar` | That jar was never committed (upstream's own `.gitignore` excludes `/lib/`) — the upstream Maven build has **never actually compiled** without a maintainer manually dropping a private copy of `ChestSort.jar` next to the project. Not a coordinate that rotted over time; it was never resolvable from a build machine at all. | Converted to full reflection: `trySort()` looks up the `ChestSort` plugin by name and invokes `sortInventory(Inventory)` via `Method.invoke`, silently doing nothing if the plugin or method isn't present. No compile-time dependency on ChestSort at all anymore — matches the softdepend-style `Class.forName` pattern already used for WorldGuard. |
 | `com.sk89q.worldguard:worldguard-legacy:7.0.0-SNAPSHOT` / `com.sk89q.worldedit:worldedit-bukkit:7.0.0-SNAPSHOT` from the dead `oss.sonatype.org` snapshot repo | `worldguard-legacy` 404s outright at EngineHub's repo today (that artifact id doesn't exist post-7.0); the pinned snapshot repo is gone | `com.sk89q.worldguard:worldguard-bukkit:7.0.18` / `com.sk89q.worldedit:worldedit-bukkit:7.4.5`, both live releases from `https://maven.enginehub.org/repo/`, both `compileOnly` (WorldGuard integration is already fully soft/optional at runtime via `Class.forName`/`getPlugin`) |
-| `Particle.SPELL_WITCH` / `Particle.SPELL` | Bukkit renamed these particle constants (~1.20.5 particle cleanup) | `Particle.WITCH` / `Particle.EFFECT` — see PLAN.md for how this was found (compiler error, not memory) |
+| `Particle.SPELL_WITCH` / `Particle.SPELL` hardcoded as field initializers | Bukkit renamed these particle constants (~1.20.5 particle cleanup); a hardcoded `Particle.WITCH` reference only compiles against post-rename `paper-api` coordinates and fails outright against 1.18.2/1.19.4/1.20.1 — this broke the backward version walk (milestone 4) before it was fixed | `resolveParticle("WITCH", "SPELL_WITCH")` / `resolveParticle("EFFECT", "SPELL")` — a small helper doing a runtime `Particle.valueOf(String)` lookup with a new-name-then-old-name fallback, same runtime-lookup pattern the `EpicFurnaces` sibling already uses for its config-driven particle type. Found via an actual failing build during the backward walk, not assumed — see PLAN.md milestone 4 |
 
 ## Platforms
 
@@ -94,9 +97,12 @@ See `PLAN.md` for the version matrix and per-version build status.
 ./gradlew build -PpaperApiVersion=1.20.1-R0.1-SNAPSHOT   # override target version
 ```
 
-- Gradle 9.x, Java 21 toolchain (this plugin's dependency footprint doesn't
-  force Java 25 the way `EpicFurnaces` did — verify live against whatever
-  `paper-api` version metadata says at build time rather than assuming).
+- Gradle 9.x, Java 25 toolchain (auto-provisioned via the foojay resolver —
+  do not install a system JDK for this). `paper-api:26.2.build.111-stable`'s
+  Gradle module metadata requires JVM 25, same constraint the `EpicFurnaces`
+  sibling hit — confirmed by an actual green build here too, not assumed.
+  Older-version builds (milestone 4) may tolerate an older toolchain since
+  their `paper-api` coordinates are plain POMs with no module metadata.
 - Single unmodified source tree (`src/main/java/de/jeffclan/InvUnload/`),
   version matrix driven entirely by the `-PpaperApiVersion=` Gradle property
   — no per-version source sets, this plugin has no version-conditional code.

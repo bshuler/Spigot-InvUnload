@@ -1,12 +1,12 @@
 main: de.jeffclan.InvUnload.InvUnload
 name: InvUnload
-version: 2.0.2
-api-version: 1.13
+version: ${version}
+api-version: "26.2"
 description: Unloads inventory in nearby matching chests
 author: mfnalex
 prefix: InvUnload
 database: false
-softdepend: [WorldGuard]
+softdepend: [WorldGuard, ChestSort]
 commands:
   unload:
     description: Unloads inventory in nearby matching chests

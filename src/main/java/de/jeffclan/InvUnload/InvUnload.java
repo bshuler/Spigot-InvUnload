@@ -7,12 +7,14 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+
 import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import com.sk89q.worldguard.WorldGuard;
 import com.sk89q.worldguard.bukkit.WorldGuardPlugin;
 import com.sk89q.worldguard.protection.flags.Flags;
 import com.sk89q.worldguard.protection.flags.StateFlag;
-import de.jeffclan.JeffChestSort.JeffChestSortPlugin;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -94,9 +96,31 @@ public class InvUnload extends JavaPlugin implements CommandExecutor, Listener {
 	private int maxChestRadius = 20;
 
 	private int particleCount = 100;
-	private Particle particleType = Particle.SPELL_WITCH;
+	// Bukkit renamed these Particle enum constants (~1.20.5 particle
+	// cleanup): SPELL_WITCH -> WITCH, SPELL -> EFFECT. A hardcoded
+	// `Particle.WITCH` reference only compiles against post-rename
+	// paper-api coordinates and fails outright (cannot find symbol)
+	// against 1.18.2/1.19.4/1.20.1 - confirmed by an actual failing build
+	// during the backward version walk, not assumed. resolveParticle()
+	// does the same Particle.valueOf(String) runtime lookup EpicFurnaces
+	// already uses for its config-driven particle type, just with a
+	// fixed new-name-then-old-name fallback instead of a config value,
+	// so this one source tree keeps compiling and behaving correctly
+	// across the whole version matrix. See CLAUDE.md.
+	private Particle particleType = resolveParticle("WITCH", "SPELL_WITCH");
 
-	private Particle particleTypeDump = Particle.SPELL;
+	private Particle particleTypeDump = resolveParticle("EFFECT", "SPELL");
+
+	private static Particle resolveParticle(String... candidateNames) {
+		for (String name : candidateNames) {
+			try {
+				return Particle.valueOf(name);
+			} catch (IllegalArgumentException ignored) {
+				// try the next candidate name
+			}
+		}
+		throw new IllegalStateException("None of the known Particle enum names were found: " + String.join(", ", candidateNames));
+	}
 
 	private Messages messages;
 
@@ -262,15 +286,27 @@ public class InvUnload extends JavaPlugin implements CommandExecutor, Listener {
 		return unstorableItems;
 	}
 
+	// ChestSort integration via reflection, no compile-time dependency.
+	// The upstream code imported de.jeffclan.JeffChestSort.JeffChestSortPlugin
+	// directly and depended on a system-scoped lib/ChestSort.jar that was
+	// never committed anywhere (upstream's own .gitignore excludes /lib/) -
+	// that build has never actually compiled standalone. Reflection removes
+	// the dependency entirely: if ChestSort isn't installed, or its API
+	// doesn't match, this silently no-ops, exactly like the WorldGuard
+	// Class.forName checks elsewhere in this file.
 	private void trySort(Inventory inventory) {
-		JeffChestSortPlugin chestSort = (JeffChestSortPlugin) getServer().getPluginManager().getPlugin("ChestSort");
+		org.bukkit.plugin.Plugin chestSort = getServer().getPluginManager().getPlugin("ChestSort");
 
-		if(!(chestSort instanceof JeffChestSortPlugin)) {
-			getLogger().warning("ChestSort plugin not found.");
+		if (chestSort == null) {
 			return;
 		}
 
-		chestSort.sortInventory(inventory);
+		try {
+			Method sortInventory = chestSort.getClass().getMethod("sortInventory", Inventory.class);
+			sortInventory.invoke(chestSort, inventory);
+		} catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
+			getLogger().warning("Found a plugin named ChestSort, but could not call its sortInventory(Inventory) method: " + e.getMessage());
+		}
 	}
 
 	public List<Block> getNearbyChests(Location location, int radius, Player player) {
@@ -425,25 +461,35 @@ public class InvUnload extends JavaPlugin implements CommandExecutor, Listener {
 		getServer().getPluginManager().registerEvents(this, this);
 		messages = new Messages(this);
 
-		@SuppressWarnings("unused")
-		Metrics metrics = new Metrics(this);
+		// bStats metrics intentionally removed here - see CLAUDE.md
+		// ("Removed / replaced dependencies"). The old vendored classic
+		// Metrics.java never needed a registered bStats.org plugin ID; the
+		// modern org.bstats:bstats-bukkit API requires one, and fabricating
+		// an ID with no real dashboard behind it would misattribute
+		// telemetry. Re-add with a real ID from bstats.org if Bert wants
+		// metrics back.
 
 		getConfig().addDefault("unload-before-dumping", true);
 		getConfig().addDefault("default-chest-radius", 10);
 		getConfig().addDefault("max-chest-radius", 20);
 		getConfig().addDefault("config-version", 0);
-		getConfig().addDefault("check-for-updates", "true");
+		// Default flipped from "true" to "false": the original update-check
+		// endpoint (api.jeff-media.de) no longer resolves at all - see
+		// CLAUDE.md. Left configurable rather than removed.
+		getConfig().addDefault("check-for-updates", "false");
 		getConfig().addDefault("use-worldguard", false);
 
 		updateChecker = new UpdateChecker(this);
 
-		if (getConfig().getString("check-for-updates", "true").equalsIgnoreCase("true")) {
+		if (getConfig().getString("check-for-updates", "false").equalsIgnoreCase("true")) {
+			getLogger().warning("check-for-updates is enabled, but the update-check endpoint (api.jeff-media.de) is known to be dead - this will just log a failure every check interval.");
 			Bukkit.getScheduler().scheduleSyncRepeatingTask(this, new Runnable() {
 				public void run() {
 					updateChecker.checkForUpdate();
 				}
 			}, 0L, updateCheckInterval * 20);
-		} else if (getConfig().getString("check-for-updates", "true").equalsIgnoreCase("on-startup")) {
+		} else if (getConfig().getString("check-for-updates", "false").equalsIgnoreCase("on-startup")) {
+			getLogger().warning("check-for-updates is enabled, but the update-check endpoint (api.jeff-media.de) is known to be dead - this will just log a failure.");
 			updateChecker.checkForUpdate();
 		}
 
