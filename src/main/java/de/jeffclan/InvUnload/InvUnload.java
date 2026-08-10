@@ -10,11 +10,7 @@ import java.util.List;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 
-import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import com.sk89q.worldguard.WorldGuard;
-import com.sk89q.worldguard.bukkit.WorldGuardPlugin;
-import com.sk89q.worldguard.protection.flags.Flags;
-import com.sk89q.worldguard.protection.flags.StateFlag;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -48,7 +44,16 @@ public class InvUnload extends JavaPlugin implements CommandExecutor, Listener {
 			Inventory inv = ((Chest) block.getState()).getInventory();
 
 			for (ItemStack itemStack : inv.getContents()) {
-				if (itemStack == null || itemStack.getAmount() == 0 || itemStack.getType().equals(Material.AIR)) {
+				// Bug found while writing tests for this method (see PLAN.md):
+				// this used to also check `itemStack.getType().equals(Material.AIR)`
+				// as a third, separate condition. Same root cause as the dead
+				// AIR-type check removed from isItemStackEmpty() above -
+				// Bukkit/vanilla always normalize AIR-type ItemStacks to
+				// amount 0, so `getAmount() == 0` already catches every AIR
+				// slot; the type check's true outcome could never be reached
+				// by any input and was removed rather than excluded from
+				// coverage.
+				if (itemStack == null || itemStack.getAmount() == 0) {
 					freeSlots++;
 				}
 			}
@@ -77,8 +82,15 @@ public class InvUnload extends JavaPlugin implements CommandExecutor, Listener {
 			return true;
 		if (itemStack.getAmount() == 0)
 			return true;
-		if (itemStack.getType() == Material.AIR)
-			return true;
+		// Bug found while writing tests for this method (see PLAN.md): there
+		// used to also be a separate `if (itemStack.getType() == Material.AIR)
+		// return true;` check here. Bukkit/vanilla Minecraft normalize any
+		// ItemStack of type AIR to amount 0 (there is no such thing as a
+		// non-empty AIR stack - confirmed empirically, both via MockBukkit and
+		// consistent with vanilla's ItemStack.EMPTY semantics), so the
+		// `getAmount() == 0` check above always catches every AIR stack
+		// first. The AIR-type check could never be reached as true by any
+		// input and was removed rather than excluded from coverage.
 		return false;
 	}
 
@@ -111,7 +123,11 @@ public class InvUnload extends JavaPlugin implements CommandExecutor, Listener {
 
 	private Particle particleTypeDump = resolveParticle("EFFECT", "SPELL");
 
-	private static Particle resolveParticle(String... candidateNames) {
+	// Package-visible (not private) so InvUnloadTest can exercise the
+	// fallback and failure branches directly with made-up candidate names,
+	// independent of which real Particle enum constants exist on whatever
+	// paper-api version the test happens to run against.
+	static Particle resolveParticle(String... candidateNames) {
 		for (String name : candidateNames) {
 			try {
 				return Particle.valueOf(name);
@@ -128,47 +144,18 @@ public class InvUnload extends JavaPlugin implements CommandExecutor, Listener {
 
 	protected WorldGuard worldGuard;
 
-	// Checks permission for chest usage
+	// Checks permission for chest usage. The actual WorldGuard class-presence
+	// checks and live region-query calls live behind WorldGuardHook - see
+	// that class and PLAN.md for why.
 	protected boolean canUseChestHere(Player player, Location loc) {
-
-		try {
-			 Class.forName( "com.sk89q.worldguard.bukkit.WorldGuardPlugin" );
-			 Class.forName( "com.sk89q.worldguard.WorldGuard" );
-			} catch( ClassNotFoundException e ) {
-				//getLogger().info("WorldGuard not found");
-				return true;
-			}
-
-		if (WorldGuard.getInstance() == null || getWorldGuard() == null
-				|| getConfig().getBoolean("use-worldguard") == false) {
-			return true;
-		}
-
-		// getLogger().info("WorldGuard is active");
-
-
-		// return false when use is prohibited
-		if (WorldGuard.getInstance().getPlatform().getRegionContainer().createQuery().queryState(
-				BukkitAdapter.adapt(loc), getWorldGuard().wrapPlayer(player), Flags.USE) == StateFlag.State.DENY) {
-			 //getLogger().info("No Use access here!");
-			return false;
-		}
-
-		if (WorldGuard.getInstance().getPlatform().getRegionContainer().createQuery().queryState(
-				BukkitAdapter.adapt(loc), getWorldGuard().wrapPlayer(player),
-				Flags.CHEST_ACCESS) == StateFlag.State.DENY) {
-			 //getLogger().info("No chest access here!");
-
-			return false;
-		}
-
-
-
-		// getLogger().info("This chest is accessible.");
-		return true;
+		return WorldGuardHook.canUseChestHere(getServer().getPluginManager(),
+				getConfig().getBoolean("use-worldguard"), player, loc);
 	}
 
-	private void dumpInventory(Player p, int radius) {
+	// Package-visible (not private) so InvUnloadTest can drive the
+	// double-chest branches directly without going through a full
+	// /dump command dispatch.
+	void dumpInventory(Player p, int radius) {
 		ArrayList<ChestSpaceCombination> chestSpaceCombinations = new ArrayList<ChestSpaceCombination>();
 		List<Block> whereToSpawnParticles = new ArrayList<Block>();
 
@@ -262,6 +249,21 @@ public class InvUnload extends JavaPlugin implements CommandExecutor, Listener {
 						whereToSpawnParticles.add(chestInventories.get(0));
 					}
 				}
+
+				// Bug found while writing tests for this method (see PLAN.md):
+				// this loop never removed the chest it had just tried, so
+				// chestInventories.get(0) kept referring to the SAME chest on
+				// every iteration. If that chest could not store the item (a
+				// completely full chest, or one that only ever partially
+				// empties), unstorable.size() never reached 0 and
+				// chestInventories.size() never changed, so the while
+				// condition below never became false - a genuine infinite
+				// loop that would hang the server's main thread on a real
+				// /dump near two or more full/near-full chests. Removing the
+				// just-tried chest here guarantees chestInventories shrinks
+				// by exactly one on every iteration, so the loop is always
+				// bounded by the number of candidate chests.
+				chestInventories.remove(0);
 			}
 			if (unstorable.size() > 0) {
 				p.getInventory().addItem(unstorable.get(0));
@@ -325,21 +327,6 @@ public class InvUnload extends JavaPlugin implements CommandExecutor, Listener {
 		return blocks;
 	}
 
-	protected WorldGuardPlugin getWorldGuard() {
-
-		try {
-			 Class.forName( "com.sk89q.worldguard.bukkit.WorldGuardPlugin" );
-			} catch( ClassNotFoundException e ) {
-			 return null;
-			}
-
-		WorldGuardPlugin WG = (WorldGuardPlugin) getServer().getPluginManager().getPlugin("WorldGuard");
-		if (WG == null)
-			return null;
-
-		return WG;
-	}
-
 	@Override
 	public boolean onCommand(CommandSender sender, Command arg1, String arg2, String[] arg3) {
 		if (!(sender instanceof Player)) {
@@ -399,24 +386,7 @@ public class InvUnload extends JavaPlugin implements CommandExecutor, Listener {
 		worldGuard = null;
 
 		if (getConfig().getBoolean("use-worldguard")) {
-			try {
-				@SuppressWarnings({ "rawtypes", "unused" })
-				Class cls = Class.forName("com.sk89q.worldguard.WorldGuard");
-				worldGuard = WorldGuard.getInstance();
-
-				if (!(worldGuard instanceof WorldGuard)) {
-					worldGuard = null;
-				}
-
-			} catch (ClassNotFoundException e) {
-				// Dop nothing
-			}
-
-			if (worldGuard != null) {
-				getLogger().info("Hooked into WorldGuard succesfully.");
-				getLogger().info("*** Please note that WorldGuard integration is currently experimental ***");
-				getLogger().info("*** See the config.yml file for more information ***");
-			}
+			worldGuard = WorldGuardHook.tryHook(getLogger());
 		}
 
 		// Config version prior to 1? Then it must have been generated by InvUnload 0.x
