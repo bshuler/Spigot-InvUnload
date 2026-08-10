@@ -97,6 +97,35 @@ See `PLAN.md` for the version matrix and per-version build status.
 ./gradlew build -PpaperApiVersion=1.20.1-R0.1-SNAPSHOT   # override target version
 ```
 
+## Tests
+
+```bash
+./gradlew test jacocoTestReport                                   # run tests + HTML/XML coverage report
+./gradlew clean test jacocoTestReport jacocoTestCoverageVerification check   # full check, enforces the 100% bar
+```
+
+- JUnit 5 + MockBukkit (`ServerMock`/`WorldMock`/`PlayerMock`, one fixed
+  target Paper API version — whatever `paper-api` `build.gradle.kts`
+  resolves by default) + Mockito for anything MockBukkit can't fake
+  (`DoubleChest`, arbitrary `Inventory`/`Chest`/`Block` behavior).
+  `TestableInvUnload` (`src/test/java/de/jeffclan/InvUnload/
+  TestableInvUnload.java`) is a test-only subclass with a few override
+  seams (`canned` chest list, `denyChestAccess`, `unloadInventoryCallCount`)
+  for scenarios the real production code has no other way to reach from a
+  unit test.
+- `jacocoTestCoverageVerification` is wired into `check` and enforces
+  `minimum = 1.00` for both LINE and BRANCH on every class **except**
+  `WorldGuardHook` (`jacocoExcludes` in `build.gradle.kts`) — see
+  `PLAN.md` milestone 6 for why that one class is excluded and what's
+  otherwise covered.
+- HTML report: `build/reports/jacoco/test/html/index.html`. XML (what CI or
+  a script should parse): `build/reports/jacoco/test/jacocoTestReport.xml`.
+- Mockito cannot spy or partial-mock `InvUnload` itself — its `worldGuard`
+  field's declared type is `compileOnly` and absent from the test runtime
+  classpath, and Mockito's inline mock maker needs to instrument the whole
+  class hierarchy (including declared field types) to build a spy. Use a
+  tracking seam on `TestableInvUnload` instead of `Mockito.spy(plugin)`.
+
 - Gradle 9.x, Java 25 toolchain (auto-provisioned via the foojay resolver —
   do not install a system JDK for this). `paper-api:26.2.build.111-stable`'s
   Gradle module metadata requires JVM 25, same constraint the `EpicFurnaces`

@@ -114,7 +114,7 @@ program's instructions say never to do.
 |---|---|---|
 | Paper | Supported (primary target) | Built and verified against this |
 | Purpur | Expected-compatible | Purpur is a Paper fork with a superset API; nothing here uses anything Purpur-incompatible |
-| Folia | Untested | Uses `Bukkit.getScheduler().scheduleSyncRepeatingTask` (global scheduler) in `onEnable()` for the update checker — Folia's region-threaded model would need this on a region/global scheduler instead. Not smoke-tested, flagged as an open problem |
+| Folia | **Not supported** (`folia-supported` deliberately left unset in `plugin.yml`) | Three concrete blockers found by static analysis, none safely fixable within this pass — see "Folia compatibility" below |
 | Spigot | Expected-compatible | No Paper-only API calls used anywhere in this plugin |
 | CraftBukkit | Expected-compatible (same reasoning) | Not a realistic deployment target in practice |
 
@@ -184,6 +184,192 @@ older-version build without separate project files.
       original task brief, left for a future pass if Bert wants runtime
       (not just compile-time) confirmation.
 
+### 6. Test coverage (Bert's directive: 100%) — DONE
+
+JUnit 5 + MockBukkit + Mockito, `jacoco` Gradle plugin wired as
+`./gradlew test jacocoTestReport jacocoTestCoverageVerification` (the latter
+enforced at `minimum = 1.00` for both LINE and BRANCH, and `check` depends on
+it — a regression fails the build, not just the report). MockBukkit is
+pinned to one fixed target: whatever `paper-api` version `build.gradle.kts`
+resolves by default (26.2 at time of writing) — the same single-source-tree/
+runtime-lookup approach from milestone 4 means the test suite doesn't need
+its own version matrix.
+
+- [x] 67 tests across 6 test classes (`InvUnloadTest`, `UtilsTest`,
+      `ChestSpaceCombinationTest`, `MessagesTest`, `UpdateCheckerTest`, plus
+      two `FakeChestSort*Plugin` fixtures with no `@Test` methods of their
+      own). All assert real behavior (return values, message contents,
+      inventory/chest state, mock invocation counts) — none merely
+      construct-without-throwing.
+- [x] **Final coverage: 100% instructions, 100% lines, 100% branches, 100%
+      methods, 100% classes** across every class JaCoCo evaluates (6
+      classes: `InvUnload`, `Utils`, `ChestSpaceCombination`, `Messages`,
+      `UpdateChecker`, `TestableInvUnload`'s production-side siblings are
+      test-only and not counted). Verified via
+      `./gradlew clean test jacocoTestReport jacocoTestCoverageVerification check`
+      — green, not just eyeballed from the HTML report.
+- [x] **One exclusion, documented per the brief's "never silently" rule:**
+      `WorldGuardHook.class` is excluded from coverage measurement
+      (`jacocoExcludes` in `build.gradle.kts`). Reason: its "WorldGuard is
+      present on the classpath and its region flag denies access" branch
+      needs an actual running WorldGuard platform (`WorldGuardPlugin`,
+      region managers, flag registries) to construct — not something a unit
+      test can fake without either shading in a huge chunk of WorldGuard's
+      own runtime or writing a hand-rolled fake so large it would just be
+      testing the fake, not the integration. The class's own Javadoc
+      documents this rationale at the source. Its "WorldGuard absent"
+      default-return-true path (the only path actually reachable from this
+      test classpath, since WorldGuard is `compileOnly`) is exercised
+      indirectly via `InvUnload`'s own tests (e.g.
+      `onEnable_useWorldguardTrue_hooksAttemptWithoutThrowingSinceWorldGuardAbsent`)
+      and via `TestableInvUnload.denyChestAccess`, which stands in for the
+      excluded "denied" branch at the `InvUnload` call-site level so
+      `getNearbyChests`'s own branch on the boolean *result* is still fully
+      covered — only `WorldGuardHook`'s internal WorldGuard-present logic
+      itself is excluded.
+- [x] **Real bugs found and fixed while writing tests** (all with the
+      failing scenario reasoned through first, not guessed):
+  1. **Infinite loop in `dumpInventory`'s overflow-handling `while` loop
+     (the most severe finding of this pass).** The loop
+     (`while (unstorable.size() > 0 && chestInventories.size() > 0)`)
+     never removed the chest it had just tried from `chestInventories`
+     inside the loop body — only the very first candidate chest was ever
+     removed, before the loop started. If that first chest could not fully
+     absorb the overflow (a completely full chest, or one that only ever
+     partially empties on each attempt), `chestInventories.get(0)` kept
+     referring to the exact same chest forever: `unstorable.size()` never
+     reached 0 and `chestInventories.size()` never changed, so neither half
+     of the `while` condition ever became false. This is a genuine
+     server-main-thread hang, reachable by any player running `/dump` near
+     two or more full/near-full chests — not a theoretical edge case, a
+     realistic one. Found by tracing why JaCoCo reported this line's
+     branch coverage as stuck at 1-of-4 no matter what test scenarios were
+     added, not by reading the code and guessing. Fixed by adding
+     `chestInventories.remove(0);` at the end of the loop body, so the
+     candidate list always shrinks by exactly one per iteration regardless
+     of outcome.
+  2. `Utils.isInteger(String)` used to also catch `NullPointerException`
+     alongside `NumberFormatException`. `Integer.parseInt(null)` throws
+     `NumberFormatException`, not `NullPointerException`, confirmed with a
+     throwaway repro against this project's own Java 25 toolchain — the
+     `NullPointerException` catch clause was unreachable dead code, removed
+     rather than excluded.
+  3. `UpdateChecker.fetchLatestVersionLine()` had no connect/read timeout on
+     its `HttpURLConnection` — a slow/unresponsive endpoint could hang
+     indefinitely. This matters because `checkForUpdate()` runs either from
+     a repeating scheduled task or synchronously inside `onEnable()`
+     (`check-for-updates: on-startup`), where an indefinite hang would stall
+     server startup entirely. Fixed with a 5-second connect and read
+     timeout.
+  4. Two dead "is this an AIR-type stack" checks (in `isItemStackEmpty` and
+     `freeSlotsInChest`) that ran *after* an `amount == 0` check — Bukkit/
+     vanilla normalize any `Material.AIR` `ItemStack` to `getAmount() == 0`
+     regardless of the constructor's requested amount, confirmed with a
+     throwaway debug assertion (`new ItemStack(Material.AIR, 1).getAmount()
+     == 0`), so the AIR-type branch could never actually be reached
+     differently from the amount check already ahead of it. Removed as
+     confirmed-dead code, not excluded.
+  5. `Utils` had an implicit public no-arg constructor despite being a
+     pure static-utility class never meant to be instantiated — JaCoCo
+     always reported it as an uncovered method with nothing to legitimately
+     call it. Given an explicit private constructor that throws
+     `UnsupportedOperationException`, which is itself now honestly tested
+     via reflection (the only way to reach a private constructor) rather
+     than excluded.
+- [x] Gotchas hit while building this suite, worth flagging for sibling
+      plugins using the same MockBukkit/Mockito stack:
+  - `ChestSpaceCombination.compareTo` + `Collections.reverseOrder()` in
+    `dumpInventory` means candidate chests are tried **most-free-space-
+    first**. Tests that need a specific chest tried first must rig its
+    mocked `getContents()`/free-slot count deliberately higher, regardless
+    of how "realistic" that free-slot count is for the scenario.
+  - Calling `player.getInventory().addItem(...)` **twice** with the same
+    material and a combined amount under the max stack size silently
+    **merges** both calls into one stack in one slot — a test meaning to
+    exercise "two separate items processed one after another" must use
+    `setItem(slotIndex, ...)` into two distinct slots instead, or the
+    per-item loop under test only ever sees one merged `ItemStack`.
+  - Mockito cannot spy (or mock-as-partial) `InvUnload` itself: its
+    `worldGuard` field's declared type (`com.sk89q.worldguard.WorldGuard`)
+    is `compileOnly` and deliberately absent from the test runtime
+    classpath (see the `WorldGuardHook` exclusion above), and Mockito's
+    inline mock maker needs to instrument the *entire* class hierarchy,
+    including declared field types, to create a spy — byte-buddy fails
+    with `NoClassDefFoundError` reaching into that field. Any test that
+    needs to verify "was method X called on this specific instance"
+    without a spy needs its own tracking seam instead (this suite added an
+    `unloadInventoryCallCount` counter and a `denyChestAccess` flag to the
+    test-only `TestableInvUnload` subclass for exactly this reason).
+  - JaCoCo's branch/line coverage for a `try` block only credits the
+    "completed successfully" path if a test actually lets the whole `try`
+    block finish without an exception escaping — a test that only ever
+    exercises the *catch* path (however many times) will never mark the
+    try block's own success-continuation instructions as covered, even
+    though some of those instructions technically execute before the
+    exception is thrown. `UpdateCheckerTest` needed a dedicated local-
+    HTTP-server test that lets `checkForUpdate()` succeed end-to-end, in
+    addition to the pre-existing "endpoint unreachable" failure test.
+
+### Folia compatibility — verdict: NOT SUPPORTED
+
+Static analysis pass (no Folia server available to smoke-test against;
+conclusions are from reading the code against Folia's documented
+regionized-threading model, not from an actual run). `folia-supported` is
+**deliberately left unset** in `plugin.yml` rather than set to `true`,
+because none of the three blockers below is something this pass could
+safely fix:
+
+1. **Legacy global scheduler for the update checker.** `onEnable()` calls
+   `Bukkit.getScheduler().scheduleSyncRepeatingTask(this, ..., 0L,
+   updateCheckInterval * 20)` — the plain `BukkitScheduler` API with no
+   location/entity context. Folia's guidance is to avoid the legacy
+   `BukkitScheduler` entirely in favor of
+   `Bukkit.getGlobalRegionScheduler()`/`getAsyncScheduler()`/
+   `getRegionScheduler()`/`entity.getScheduler()`, since the legacy API
+   assumes a single global tick loop that Folia's regionized model doesn't
+   have. The task body itself (`updateChecker.checkForUpdate()`) touches no
+   per-region state at all — it's pure network I/O plus logging — so this
+   specific blocker genuinely is the "safely fixable" kind (swap to
+   `getAsyncScheduler().runAtFixedRate(...)`, which also happens to be a
+   more correct place to put blocking network I/O on any platform, Folia
+   or not). **Not fixed in this pass** to avoid introducing untested async
+   scheduling code right after landing a 100%-enforced coverage bar, and
+   because it doesn't change the overall verdict below by itself — flagged
+   for whoever does take on the other two blockers.
+2. **`getNearbyChests`'s radius-cube block scan can cross a region
+   boundary.** The scan reads every block in a `(2r+1)^3` cube centered on
+   the command-issuing player's own location (`x/y/z` triple loop calling
+   `getBlockAt` directly), with `r` configurable up to `max-chest-radius`
+   (default 20). A player-issued command dispatches on the region that
+   owns the player, but nothing about Folia's region boundaries is aligned
+   to a plugin's configured chest-search radius — a player standing within
+   `max-chest-radius` blocks of a region edge can have some of those cube
+   coordinates fall inside a *different* region than the one the command
+   thread owns. Folia's whole threading model exists specifically to make
+   that kind of cross-region access unsafe (it's not merely discouraged;
+   Folia's own server implementation is built to catch and reject exactly
+   this pattern). This is the core, load-bearing behavior of the plugin
+   (a radius scan around the player) — making it provably region-safe
+   would mean re-dispatching per-chunk/per-region ownership checks rather
+   than one flat triple loop, which is a real re-architecture, not a
+   one-line fix. **This is the reason `folia-supported` stays unset even
+   though blocker 1 above is cheap to fix.**
+3. **`unloadInventory`'s `DoubleChest` handling reads both chest halves
+   directly** (`doubleChest.getLeftSide()`/`getRightSide()` → each side's
+   own `Block`) once a double chest is found. A double chest that happens
+   to straddle a region boundary (rare, but by construction two adjacent
+   blocks can legitimately fall in different regions right at an edge)
+   has the same cross-region-access shape as blocker 2, just for a single
+   pair of blocks instead of a whole cube. Same root cause, much smaller
+   blast radius — not independently fixed since fixing blocker 2 properly
+   would need to account for this case anyway.
+
+No mutable static shared state exists anywhere in this plugin (checked all
+three `static` fields: one is `private static final int
+currentConfigVersion`, an immutable constant; the rest are pure static
+*methods* with no backing static field) — that specific Folia risk category
+is a non-issue here, unlike the scheduler/region-access ones above.
+
 ## Open problems / honest blockers
 
 - **ChestSort's original build was never actually resolvable.** Upstream's
@@ -193,13 +379,8 @@ older-version build without separate project files.
   first commit. This wasn't discovered as a regression; it's how the
   project always was. Converted to reflection (see `CLAUDE.md`), removing
   the problem rather than working around it.
-- **Folia untested.** The update-checker's repeating task uses
-  `Bukkit.getScheduler().scheduleSyncRepeatingTask` (global scheduler) —
-  Folia's region-threaded scheduler model may not like a plugin scheduling
-  global-scope repeating tasks this way. Not smoke-tested on an actual
-  Folia server this session. Low real-world impact since
-  `check-for-updates` now defaults to `false` and the endpoint is dead
-  anyway, but flagged honestly rather than assumed fine.
+- **Folia is not supported** — see the dedicated "Folia compatibility"
+  section above (milestone 6) for the full three-blocker analysis.
 - **`scheduleSyncRepeatingTask` is itself a deprecated API** (superseded by
   `BukkitScheduler.runTaskTimer`/`BukkitRunnable`) — this is the source of
   the `BUILD SUCCESSFUL` build's "Some input files use or override a
