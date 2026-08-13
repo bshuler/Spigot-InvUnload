@@ -46,14 +46,28 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
-    // MockBukkit-v1.21 (3.133.2) is the newest MockBukkit artifact
-    // published (checked live against Maven Central, not assumed) - it
-    // targets paper-api 1.21.1-R0.1-SNAPSHOT, which it also pulls in
-    // transitively as a compile-scope dependency, so it's enough on its
-    // own to compile and run the test source set against real Bukkit API
-    // types. Tests run against this one fixed target regardless of the
-    // -PpaperApiVersion property used for the packaged jar - see CLAUDE.md.
-    testImplementation("com.github.seeseemelk:MockBukkit-v1.21:3.133.2")
+    // MockBukkit moved Maven group from `com.github.seeseemelk` to
+    // `org.mockbukkit.mockbukkit` and now publishes a 26.x-targeting
+    // artifact. This repo sat on the old `MockBukkit-v1.21:3.133.2` long
+    // after five sibling plugin repos had moved, which meant its tests
+    // asserted 1.21 API semantics for a plugin whose packaged jar targets
+    // up to 26.2 - exactly the version drift the tests exist to catch.
+    // Now aligned with the siblings. The move also renamed every test import
+    // from `be.seeseemelk.mockbukkit.*` to `org.mockbukkit.mockbukkit.*`
+    // (WorldMock and UnimplementedOperationException additionally moved into
+    // `.world` / `.exception` subpackages).
+    //
+    // Unlike the old `com.github.seeseemelk` artifact, this one does NOT bring
+    // paper-api transitively - without the explicit dependency below the test
+    // sources fail to compile on `import org.bukkit.plugin.java.JavaPlugin`.
+    // It is pinned to the exact Paper build MockBukkit captured its bundled
+    // registry-data snapshot from, NOT to -PpaperApiVersion: a newer paper-api
+    // on the test classpath compiles fine and then fails at test RUNTIME with
+    // InternalDataLoadException. So the tests validate one fixed API target
+    // (26.1.2) while the packaged jar is built against whatever
+    // -PpaperApiVersion asks for - see CLAUDE.md.
+    testImplementation("io.papermc.paper:paper-api:26.1.2.build.74-stable")
+    testImplementation("org.mockbukkit.mockbukkit:mockbukkit-v26.1.2:4.115.0")
     // Used only for the DoubleChest branches in dumpInventory/
     // unloadInventory: org.bukkit.block.DoubleChest has no MockBukkit
     // equivalent (MockBukkit doesn't merge adjacent chests), so those

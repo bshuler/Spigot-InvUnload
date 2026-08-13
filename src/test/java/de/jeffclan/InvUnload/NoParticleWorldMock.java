@@ -1,6 +1,6 @@
 package de.jeffclan.InvUnload;
 
-import be.seeseemelk.mockbukkit.WorldMock;
+import org.mockbukkit.mockbukkit.world.WorldMock;
 import org.bukkit.Location;
 import org.bukkit.Particle;
 
@@ -8,7 +8,7 @@ import org.bukkit.Particle;
  * MockBukkit 3.133.2's WorldMock does not implement the
  * spawnParticle(Particle, Location, int) overload that InvUnload uses for
  * its purely cosmetic "poof" effect after a successful unload/dump - calling
- * it throws be.seeseemelk.mockbukkit.UnimplementedOperationException, which
+ * it throws org.mockbukkit.mockbukkit.exception.UnimplementedOperationException, which
  * JUnit reports as a skipped (not failed) test, silently truncating the real
  * production code path we actually want exercised (the particle call is the
  * very last statement in each success branch).

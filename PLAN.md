@@ -415,3 +415,15 @@ is a non-issue here, unlike the scheduler/region-access ones above.
   the prepared commit message is appended to the session scratchpad's
   `Spigot-InvUnload-commit-msg.txt` instead of being force-committed
   unsigned.
+
+## Coverage in context (measured 2026-08-13)
+
+Read from the JaCoCo XML report, not from whether the gate passes:
+
+- **Analysed surface:** 6 of 7 compiled classes (86%).
+- **Line coverage of that surface:** 100.0% (319 lines analysed).
+- Classes outside that surface are excluded by the documented exclusion list. They
+  are not covered by any test and are not runtime-verified.
+
+A passing `check` means "no regression inside the analysed surface" — it does not
+mean the whole codebase is tested to that percentage.
