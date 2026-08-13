@@ -154,3 +154,26 @@ See `PLAN.md` for the version matrix and per-version build status.
   cosmetic fix, not a functional bug (Bukkit doesn't require every granted
   permission to have a matching `permissions:` entry) — flagged in case Bert
   wants it corrected.
+
+## Tier 2: real-server boot test (added 2026-08-13)
+
+```bash
+./gradlew paperBootTest -PpaperServerJar=/path/to/paper-26.2-111.jar
+```
+
+Boots a **real** headless Paper server with the packaged jar in `plugins/` and
+asserts six things only a live server can answer: the jar loads, `onEnable()`
+does not throw, every expected command is registered in the live command map,
+none of them throws when invoked, the plugin shows up in the server's own
+`plugins` listing, and `onDisable()` runs with a clean exit 0. Last verified
+run:
+
+```
+paperBootTest: InvUnload loaded, enabled, 2 expected command(s) registered (2 from plugin.yml, 0 registered at runtime), and shut down cleanly on a real Paper server.
+```
+
+Opt-in and **not** wired into `check` — no server jar means
+`paperBootTest SKIPPED (this is a skip, not a pass)`, never a green tick. Get a
+jar from <https://fill.papermc.io/v3/projects/paper>; the full console
+transcript lands in `build/paper-boot/paper-boot-test.log`. Scope, gotchas and
+the defects found while validating the harness are in `PLAN.md`.

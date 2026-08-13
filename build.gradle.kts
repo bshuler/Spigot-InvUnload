@@ -152,3 +152,8 @@ tasks.jacocoTestCoverageVerification {
 tasks.check {
     dependsOn(tasks.jacocoTestCoverageVerification)
 }
+
+// Tier 2: boots a real headless Paper server with the packaged jar installed.
+// Opt-in (needs -PpaperServerJar=...), deliberately not wired into `check`.
+// See gradle/paper-boot-test.gradle.kts and PLAN.md.
+apply(from = "gradle/paper-boot-test.gradle.kts")
