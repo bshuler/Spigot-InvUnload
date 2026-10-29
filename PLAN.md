@@ -14,14 +14,14 @@ support. See `CLAUDE.md` for architecture and fork provenance.
 - [x] Confirmed this is a real GitHub fork of `JEFF-Media-GbR/Spigot-InvUnload`
       (`upstream` remote present and fetched).
 - [x] Inventoried divergence: `git log upstream/master..HEAD` is **empty** —
-      Bert's fork has zero unique commits, sitting at upstream's first
-      commit. Nothing of Bert's to preserve through the merge.
+      Human's fork has zero unique commits, sitting at upstream's first
+      commit. Nothing of Human's to preserve through the merge.
 - [x] Inventoried upstream: 28 commits ahead, last pushed 2020-06-16.
       Upstream's own `README.md` says the project moved to
       `JEFF-Media-GbR/Spigot-InvUnloadPlus` (GPL-3.0, actively maintained,
       last push 2024-10-27). Documented in `CLAUDE.md`; **not** adopted as
       the new upstream target — out of scope for this task, recorded as a
-      future option for Bert.
+      future option for Human.
 - [x] Checked upstream's history for JeffLib/CustomBlockData/
       MorePersistentDataTypes/SpigotUpdateChecker — none appear anywhere in
       this plugin's lineage, so no vendoring/replacement needed on that
@@ -181,10 +181,10 @@ older-version build without separate project files.
       committed-default state.
 - [ ] Optional Paper smoke-boot in the session scratchpad only (never
       committed) — not performed this session; noted as optional in the
-      original task brief, left for a future pass if Bert wants runtime
+      original task brief, left for a future pass if Human wants runtime
       (not just compile-time) confirmation.
 
-### 6. Test coverage (Bert's directive: 100%) — DONE
+### 6. Test coverage (Human's directive: 100%) — DONE
 
 JUnit 5 + MockBukkit + Mockito, `jacoco` Gradle plugin wired as
 `./gradlew test jacocoTestReport jacocoTestCoverageVerification` (the latter
@@ -395,7 +395,7 @@ is a non-issue here, unlike the scheduler/region-access ones above.
 - **The `invunload:dump` (colon) permission-node typo is inherited from
   upstream and deliberately left unfixed** — see `CLAUDE.md`'s porting
   notes. Cosmetic (the command's own `permission:` field already says
-  `invunload.dump` correctly), flagged in case Bert wants it corrected.
+  `invunload.dump` correctly), flagged in case Human wants it corrected.
 - **The update-check endpoint (`api.jeff-media.de`) is permanently dead**
   (`curl` gets a full connection failure, not even a 404) unless a new
   endpoint is ever configured — `check-for-updates` defaults to `false`
@@ -410,7 +410,7 @@ is a non-issue here, unlike the scheduler/region-access ones above.
 - No `.github/workflows/*` came in from the upstream merge — checked the
   upstream tree before merging; the push-scope restriction on this repo's
   `gh` token was not triggered.
-- Commits authored as `Bert Shuler <BertShuler@proton.me>`, signed via the
+- Commits authored as the repo's configured git identity, signed via the
   1Password SSH agent. If signing ever fails with no human at the keyboard,
   the prepared commit message is appended to the session scratchpad's
   `Spigot-InvUnload-commit-msg.txt` instead of being force-committed

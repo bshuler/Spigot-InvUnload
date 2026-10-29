@@ -16,9 +16,9 @@ This repo is a genuine GitHub fork of `JEFF-Media-GbR/Spigot-InvUnload`
 (`git remote -v` shows `upstream`). Investigated before touching anything,
 per the porting playbook:
 
-- **Bert's fork had zero unique commits.** `git log upstream/master..HEAD`
+- **Human's fork had zero unique commits.** `git log upstream/master..HEAD`
   was empty — the fork was created at upstream's very first commit
-  (`76fdc69 First commit`) and never advanced. There was nothing of Bert's
+  (`76fdc69 First commit`) and never advanced. There was nothing of Human's
   to preserve; bringing the fork current is a plain fast-forward merge, not
   a rebase-and-reconcile.
 - **Upstream is dead, on purpose.** `JEFF-Media-GbR/Spigot-InvUnload`'s last
@@ -30,9 +30,9 @@ per the porting playbook:
   WorldEdit/bStats/`com.jeff_media.updatechecker` integrations).
 - **This task stays scoped to `Spigot-InvUnload`, not `InvUnloadPlus`.**
   The assignment is to modernize *this* forked repo, not to re-point it at a
-  different upstream project — that would be a scope change Bert didn't ask
+  different upstream project — that would be a scope change Human didn't ask
   for. `InvUnloadPlus` is recorded here as a known, license-compatible
-  (GPL-3.0) successor worth a look if Bert ever wants the fuller feature set,
+  (GPL-3.0) successor worth a look if Human ever wants the fuller feature set,
   but no code was copied from it and this port does not depend on it.
   JEFF Media's other signature libraries (JeffLib, CustomBlockData,
   MorePersistentDataTypes, SpigotUpdateChecker) are **not used anywhere in
@@ -152,7 +152,7 @@ See `PLAN.md` for the version matrix and per-version build status.
   Left as-is / documented rather than silently "fixed", since changing a
   permission node's declared description key is a behavior-neutral
   cosmetic fix, not a functional bug (Bukkit doesn't require every granted
-  permission to have a matching `permissions:` entry) — flagged in case Bert
+  permission to have a matching `permissions:` entry) — flagged in case Human
   wants it corrected.
 
 ## Tier 2: real-server boot test (added 2026-08-13)

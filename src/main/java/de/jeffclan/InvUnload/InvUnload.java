@@ -436,7 +436,7 @@ public class InvUnload extends JavaPlugin implements CommandExecutor, Listener {
 		// Metrics.java never needed a registered bStats.org plugin ID; the
 		// modern org.bstats:bstats-bukkit API requires one, and fabricating
 		// an ID with no real dashboard behind it would misattribute
-		// telemetry. Re-add with a real ID from bstats.org if Bert wants
+		// telemetry. Re-add with a real ID from bstats.org if Human wants
 		// metrics back.
 
 		getConfig().addDefault("unload-before-dumping", true);
